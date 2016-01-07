@@ -1,0 +1,9 @@
+name: LootCrates
+main: com.patrickzhong.lootcrates.LootCrates
+version: 1
+
+commands:
+  lcadd:
+    description: Adds loot crate.
+    usage: /<command> <here | x,y,z>
+    permission: lootcrates.lcadd
