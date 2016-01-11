@@ -11,6 +11,7 @@ import java.util.logging.Logger;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Effect;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -27,13 +28,17 @@ import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.InventoryHolder;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.block.Chest;
 import org.bukkit.metadata.FixedMetadataValue;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.RegisteredServiceProvider;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
+import com.patrickzhong.kingdomlifeapi.KingdomLifeAPI;
 /**
  * 
  * @author Patrick Zhong
@@ -48,12 +53,19 @@ public class LootCrates extends JavaPlugin implements Listener{
 	FileConfiguration locEmpty = null;
 	FileConfiguration locUsed = null;
 	public static Plugin plugin;
+	private KingdomLifeAPI kLifeAPI;
 	
 	private String prefix = ChatColor.DARK_GRAY + "" + ChatColor.BOLD + "[" + ChatColor.AQUA + "LootCrates" + ChatColor.DARK_GRAY + "" + ChatColor.BOLD + "] ";
 	
 	public void onEnable(){
 		plugin = this;
 		this.getServer().getPluginManager().registerEvents(this, this);   // Registers plugin to listen events
+		
+		if (!setUpKingdomLifeAPI() ) {
+            getLogger().severe(String.format("[%s] - Disabled due to no KingdomLifeAPI found!", getDescription().getName()));
+            getServer().getPluginManager().disablePlugin(this);
+            return;
+        }
 		
 		try{
             if(!getDataFolder().exists())
@@ -67,6 +79,7 @@ public class LootCrates extends JavaPlugin implements Listener{
         		config.addDefault("ItemHighestLevel", 70);                // Highest level of an item
         		config.addDefault("ItemMaxLevelDifference", 10);          // Max level difference of an item
         		config.addDefault("AllowNewCrateLocations", true);        // Whether adding locations is allowed
+        		config.addDefault("DebugLogging", false);        // Whether debug messages show
         		config.addDefault("CrateRespawnDelay", 30);               // Delay for crate respawn (seconds)
         		config.addDefault("CrateUpgradeDelay", 10);               // Delay for crate upgrade (seconds)
         		config.options().copyDefaults(true);                      // Implements defaults
@@ -86,10 +99,22 @@ public class LootCrates extends JavaPlugin implements Listener{
 		
 		primeUpgrades();
 		primeRespawns();
+		startParticles();
 		
 		getLogger().info("LootCrates enabled!");
 	}
 	
+	private boolean setUpKingdomLifeAPI(){
+		if (getServer().getPluginManager().getPlugin("KingdomLifeAPI") == null) {
+            return false;
+        }
+        RegisteredServiceProvider<KingdomLifeAPI> rsp = getServer().getServicesManager().getRegistration(KingdomLifeAPI.class);
+        if (rsp == null) {
+            return false;
+        }
+        kLifeAPI = rsp.getProvider();
+        return kLifeAPI != null;
+	}
 	
 	public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args){
 		
@@ -113,7 +138,7 @@ public class LootCrates extends JavaPlugin implements Listener{
 				}
 				
 				spawnCrate(loc);                                          // Spawn a new crate
-				messageP(player, ChatColor.GREEN+"Successfully added crate at "+loc.getWorld().getName()+","+loc.getX()+","+loc.getY()+","+loc.getZ());
+				messageP(player, ChatColor.GREEN+"Successfully added crate at "+loc.getWorld().getName()+","+loc.getBlockX()+","+loc.getBlockY()+","+loc.getBlockZ());
 			}else
 				messageP(player, ChatColor.RED+"Adding new crates is disabled in config.");
 			
@@ -174,6 +199,53 @@ public class LootCrates extends JavaPlugin implements Listener{
 	}
 	
 	@EventHandler
+	public void onInvOpen(InventoryOpenEvent ev){
+		InventoryHolder holder = ev.getInventory().getHolder();
+		if(holder instanceof Chest && ((Chest)holder).hasMetadata("isCrate") && ((Chest)holder).getMetadata("isCrate").size() == 1 && ((Chest)holder).getMetadata("isCrate").get(0).asBoolean()){
+			//And now for the MAGIC
+			refreshC();
+			
+			Chest chest = (Chest)holder;
+			String sLoc = serializeLoc(chest.getLocation());
+			Crate crate = new Crate(locUsed.getString(sLoc)); 
+			
+			String uuid = ((Player)ev.getPlayer()).getUniqueId().toString();
+			String type = kLifeAPI.type(uuid);
+			int level = kLifeAPI.level(uuid, type) + crate.level;
+			if(level < 0)
+				level = 0;
+			else {
+				int maxLevel = config.getInt("ItemHighestLevel");
+				if(level > maxLevel)
+					level = maxLevel;
+			}
+			
+			String[] rarityArr = {"Common","Uncommon","Unique","Rare"};
+			int ranRar  = (int)Math.floor(Math.random()*4);
+			
+			List<ItemStack> items = kLifeAPI.getItems(type, rarityArr[ranRar], level+"");
+			ItemStack item = items.get((int)Math.floor(Math.random()*items.size()));
+			
+			int shards = (int)Math.floor(Math.random()*5+1) + level * 4;
+			ItemStack shardStack = new ItemStack(Material.PRISMARINE_SHARD, shards);
+			ItemMeta im = shardStack.getItemMeta();
+			List<String> lores = im.getLore();
+			if(lores == null)
+				lores = new ArrayList<String>();
+			lores.add(ChatColor.GRAY+"Worth: 1/64th Emerald");
+			lores.add("");
+			lores.add(ChatColor.GREEN+"Currency");
+			im.setDisplayName(ChatColor.GREEN+"Emerald Shard");
+			im.setLore(lores);
+			shardStack.setItemMeta(im);
+			
+			chest.getInventory().setItem(0, item);
+			chest.getInventory().setItem(1, shardStack);
+		}
+		
+	}
+	
+	@EventHandler
 	public void onInvClose(InventoryCloseEvent ev){
 		InventoryHolder holder = ev.getInventory().getHolder();
 		if(holder instanceof Chest && ((Chest)holder).hasMetadata("isCrate") && ((Chest)holder).getMetadata("isCrate").size() == 1 && ((Chest)holder).getMetadata("isCrate").get(0).asBoolean()){
@@ -199,7 +271,8 @@ public class LootCrates extends JavaPlugin implements Listener{
 			Block c = chest.getWorld().getBlockAt(chest.getLocation());  // Block representing chest
 			c.setType(Material.AIR);                                     // Removes block
 			setTimer(crate, "respawn");                                  // Sets timer for respawn
-			messageP((Player)ev.getPlayer(), ChatColor.YELLOW+"You have looted a level "+crate.level+" crate.");
+			if(config.getBoolean("DebugLogging"))                        // Checks if debug logging is on
+				messageP((Player)ev.getPlayer(), ChatColor.YELLOW+"You have looted a level "+crate.level+" crate.");
 		}
 	}
 	
@@ -221,7 +294,8 @@ public class LootCrates extends JavaPlugin implements Listener{
 		crate.upgradeTime = (new Date()).getTime() + config.getInt("CrateUpgradeDelay")*1000; // Assigns next target upgrade time
 		setTimer(crate, "upgrade");                                     // Sets timer for upgrading
 		locUsed.set(sLoc, crate.toString());                            // Sets new crate into file with serialized location key
-		getLogger().info("Crate upgraded.");
+		if(config.getBoolean("DebugLogging"))
+			getLogger().info("Crate upgraded.");
 		saveLU();
 		
 	}
@@ -254,8 +328,10 @@ public class LootCrates extends JavaPlugin implements Listener{
         return timer;
 	}
 	
+	
 	private void primeUpgrades(){                                      // Handles catching up on upgrading after plugin startup
 		locUsed = YamlConfiguration.loadConfiguration(locUsedFile);
+		
 		Set<String> used = locUsed.getKeys(false);                     // All used serialized locations
 		for(String sCrate : used){
 			Crate c = new Crate(locUsed.getString(sCrate));
@@ -293,6 +369,27 @@ public class LootCrates extends JavaPlugin implements Listener{
 		        }.runTaskLater(this, (int)delay*20);
 			}
 		}
+	}
+	
+	private void startParticles(){
+		new BukkitRunnable(){
+			public void run(){
+				locUsed = YamlConfiguration.loadConfiguration(locUsedFile);
+				Set<String> used = locUsed.getKeys(false);                     // All used serialized locations
+				for(String sCrate : used){
+					String[] arr = sCrate.replace(";", ".").split(",");
+					Location loc = new Location(Bukkit.getServer().getWorld(arr[0]), Double.parseDouble(arr[1]), Double.parseDouble(arr[2]), Double.parseDouble(arr[3]));
+					loc.add(1, 0, 0);
+					loc.getWorld().playEffect(loc, Effect.STEP_SOUND, 79);
+					loc.subtract(2, 0, 0);
+					loc.getWorld().playEffect(loc, Effect.STEP_SOUND, 79);
+					loc.add(1, 0, 1);
+					loc.getWorld().playEffect(loc, Effect.STEP_SOUND, 79);
+					loc.add(0, 0, 2);
+					loc.getWorld().playEffect(loc, Effect.STEP_SOUND, 79);
+				}
+			}
+		}.runTaskTimer(this, 0, 40);
 	}
 	
 	private String serializeLoc(Location loc){                         // Returns a string representation of a location that is easier to use and store
