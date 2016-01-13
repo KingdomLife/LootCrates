@@ -20,6 +20,8 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.craftbukkit.v1_8_R3.entity.CraftPlayer;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -39,6 +41,9 @@ import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 
 import com.patrickzhong.kingdomlifeapi.KingdomLifeAPI;
+
+import net.minecraft.server.v1_8_R3.EnumParticle;
+import net.minecraft.server.v1_8_R3.PacketPlayOutWorldParticles;
 /**
  * 
  * @author Patrick Zhong
@@ -54,19 +59,13 @@ public class LootCrates extends JavaPlugin implements Listener{
 	FileConfiguration locUsed = null;
 	public static Plugin plugin;
 	private KingdomLifeAPI kLifeAPI;
+	final EnumParticle[] particles = {EnumParticle.CLOUD, EnumParticle.CRIT_MAGIC, EnumParticle.SPELL_WITCH, EnumParticle.VILLAGER_HAPPY};
 	
 	private String prefix = ChatColor.DARK_GRAY + "" + ChatColor.BOLD + "[" + ChatColor.AQUA + "LootCrates" + ChatColor.DARK_GRAY + "" + ChatColor.BOLD + "] ";
 	
 	public void onEnable(){
 		plugin = this;
 		this.getServer().getPluginManager().registerEvents(this, this);   // Registers plugin to listen events
-		
-		if (!setUpKingdomLifeAPI() ) {
-            getLogger().severe(String.format("[%s] - Disabled due to no KingdomLifeAPI found!", getDescription().getName()));
-            getServer().getPluginManager().disablePlugin(this);
-            return;
-        }
-		
 		try{
             if(!getDataFolder().exists())
             	getDataFolder().mkdir();                                  // No data folder; creating one
@@ -101,13 +100,24 @@ public class LootCrates extends JavaPlugin implements Listener{
 		primeRespawns();
 		startParticles();
 		
-		getLogger().info("LootCrates enabled!");
+		new BukkitRunnable(){
+			public void run(){
+				if (!setUpKingdomLifeAPI() ) {
+		            getLogger().severe(String.format("[%s] - Disabled due to no KingdomLifeAPI found!", getDescription().getName()));
+		            getServer().getPluginManager().disablePlugin(plugin);
+		            return;
+		        }
+				getLogger().info("LootCrates enabled!");
+			}
+		}.runTaskLater(plugin, 1);
 	}
 	
 	private boolean setUpKingdomLifeAPI(){
 		if (getServer().getPluginManager().getPlugin("KingdomLifeAPI") == null) {
             return false;
         }
+		//getLogger().info((getServer().getPluginManager().getPlugin("KingdomLifeAPI") == null)+"");
+		//getLogger().info(getServer().getPluginManager().getPlugins().toString());
         RegisteredServiceProvider<KingdomLifeAPI> rsp = getServer().getServicesManager().getRegistration(KingdomLifeAPI.class);
         if (rsp == null) {
             return false;
@@ -378,18 +388,49 @@ public class LootCrates extends JavaPlugin implements Listener{
 				Set<String> used = locUsed.getKeys(false);                     // All used serialized locations
 				for(String sCrate : used){
 					String[] arr = sCrate.replace(";", ".").split(",");
-					Location loc = new Location(Bukkit.getServer().getWorld(arr[0]), Double.parseDouble(arr[1]), Double.parseDouble(arr[2]), Double.parseDouble(arr[3]));
-					loc.add(1, 0, 0);
-					loc.getWorld().playEffect(loc, Effect.STEP_SOUND, 79);
-					loc.subtract(2, 0, 0);
-					loc.getWorld().playEffect(loc, Effect.STEP_SOUND, 79);
-					loc.add(1, 0, 1);
-					loc.getWorld().playEffect(loc, Effect.STEP_SOUND, 79);
-					loc.add(0, 0, 2);
-					loc.getWorld().playEffect(loc, Effect.STEP_SOUND, 79);
+					final Location loc = new Location(Bukkit.getServer().getWorld(arr[0]), Double.parseDouble(arr[1]), Double.parseDouble(arr[2]), Double.parseDouble(arr[3]));
+					final double x = loc.getBlockX() + 0.125 + 0.5;
+					final double y = loc.getBlockY() + 0.125;
+					final double z = loc.getBlockZ() + 0.125 + 0.5;
+					final double maxRadius = 2.0;
+					final Double[] time = {0.0};
+					
+					new BukkitRunnable(){
+						public void run(){
+							double radius = radius(time[0], maxRadius);
+							
+							for(double i = 0; i < Math.PI*2; i+=Math.PI/20){
+								float newX = (float)(xLoc(i, radius) + x);
+								float newY = (float)(y+maxRadius-time[0]);
+								float newZ = (float)(zLoc(i, radius) + z);
+								
+								PacketPlayOutWorldParticles packet= new PacketPlayOutWorldParticles(EnumParticle.VILLAGER_HAPPY, true, newX, newY, newZ, 0f, 0f, 0f, 0f, 1);
+								for(Player player : Bukkit.getServer().getOnlinePlayers()){
+									((CraftPlayer)player).getHandle().playerConnection.sendPacket(packet);
+								}
+							}
+							
+							time[0] += 0.2;
+							if(radius >= maxRadius)
+								this.cancel();
+						}
+					}.runTaskTimer(plugin, 0, 2);
+					
 				}
 			}
-		}.runTaskTimer(this, 0, 40);
+		}.runTaskTimer(this, 0, 100);
+	}
+	
+	private double xLoc(double time, double radius){
+		return Math.sin(time) * radius;
+	}
+	
+	private double zLoc(double time, double radius){
+		return Math.cos(time) * radius;
+	}
+	
+	private double radius(double time, double maxRadius){
+		return Math.sqrt(Math.pow(maxRadius,2) - Math.pow(time-maxRadius, 2));
 	}
 	
 	private String serializeLoc(Location loc){                         // Returns a string representation of a location that is easier to use and store
