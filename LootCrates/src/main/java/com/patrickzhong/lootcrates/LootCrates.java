@@ -29,6 +29,7 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -58,8 +59,10 @@ public class LootCrates extends JavaPlugin implements Listener{
 	FileConfiguration locEmpty = null;
 	FileConfiguration locUsed = null;
 	public static Plugin plugin;
-	private KingdomLifeAPI kLifeAPI;
+	//private KingdomLifeAPI kLifeAPI;
 	final EnumParticle[] particles = {EnumParticle.CLOUD, EnumParticle.CRIT_MAGIC, EnumParticle.SPELL_WITCH, EnumParticle.VILLAGER_HAPPY};
+	
+	HashMap<Player,Crate> openCrates = new HashMap<Player,Crate>();
 	
 	private String prefix = ChatColor.DARK_GRAY + "" + ChatColor.BOLD + "[" + ChatColor.AQUA + "LootCrates" + ChatColor.DARK_GRAY + "" + ChatColor.BOLD + "] ";
 	
@@ -100,7 +103,7 @@ public class LootCrates extends JavaPlugin implements Listener{
 		primeRespawns();
 		startParticles();
 		
-		new BukkitRunnable(){
+		/*new BukkitRunnable(){
 			public void run(){
 				if (!setUpKingdomLifeAPI() ) {
 		            getLogger().severe(String.format("[%s] - Disabled due to no KingdomLifeAPI found!", getDescription().getName()));
@@ -110,12 +113,14 @@ public class LootCrates extends JavaPlugin implements Listener{
 				getLogger().info("LootCrates enabled!");
 			}
 		}.runTaskLater(plugin, 1);
+		*/
 	}
 	
-	private boolean setUpKingdomLifeAPI(){
+	/*private boolean setUpKingdomLifeAPI(){
 		if (getServer().getPluginManager().getPlugin("KingdomLifeAPI") == null) {
             return false;
         }
+		
 		//getLogger().info((getServer().getPluginManager().getPlugin("KingdomLifeAPI") == null)+"");
 		//getLogger().info(getServer().getPluginManager().getPlugins().toString());
         RegisteredServiceProvider<KingdomLifeAPI> rsp = getServer().getServicesManager().getRegistration(KingdomLifeAPI.class);
@@ -124,7 +129,7 @@ public class LootCrates extends JavaPlugin implements Listener{
         }
         kLifeAPI = rsp.getProvider();
         return kLifeAPI != null;
-	}
+	}*/
 	
 	public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args){
 		
@@ -215,13 +220,18 @@ public class LootCrates extends JavaPlugin implements Listener{
 			//And now for the MAGIC
 			refreshC();
 			
+			ev.setCancelled(true);
+			
 			Chest chest = (Chest)holder;
 			String sLoc = serializeLoc(chest.getLocation());
 			Crate crate = new Crate(locUsed.getString(sLoc)); 
+			Player player = (Player)ev.getPlayer();
 			
-			String uuid = ((Player)ev.getPlayer()).getUniqueId().toString();
-			String type = kLifeAPI.type(uuid);
-			int level = kLifeAPI.level(uuid, type) + crate.level;
+			openCrates.put(player, crate);
+			
+			String uuid = player.getUniqueId().toString();
+			String type = KingdomLifeAPI.type(uuid);
+			int level = KingdomLifeAPI.level(uuid, type) + crate.level;
 			if(level < 0)
 				level = 0;
 			else {
@@ -233,7 +243,7 @@ public class LootCrates extends JavaPlugin implements Listener{
 			String[] rarityArr = {"Common","Uncommon","Unique","Rare"};
 			int ranRar  = (int)Math.floor(Math.random()*4);
 			
-			List<ItemStack> items = kLifeAPI.getItems(type, rarityArr[ranRar], level+"");
+			List<ItemStack> items = KingdomLifeAPI.getItems(type, rarityArr[ranRar], level+"");
 			ItemStack item = items.get((int)Math.floor(Math.random()*items.size()));
 			
 			int shards = (int)Math.floor(Math.random()*5+1) + level * 4;
@@ -249,23 +259,31 @@ public class LootCrates extends JavaPlugin implements Listener{
 			im.setLore(lores);
 			shardStack.setItemMeta(im);
 			
-			chest.getInventory().setItem(0, item);
-			chest.getInventory().setItem(1, shardStack);
+			int tier = (int)Math.floor(((double)crate.level)/5.0);
+			
+			Inventory spectate = Bukkit.createInventory(ev.getPlayer(), 4, "Tier "+tier+" Loot Crate");
+	        
+			spectate.setItem(0, item);
+			spectate.setItem(1, shardStack);
+
+			player.openInventory(spectate);
 		}
 		
 	}
 	
 	@EventHandler
 	public void onInvClose(InventoryCloseEvent ev){
-		InventoryHolder holder = ev.getInventory().getHolder();
-		if(holder instanceof Chest && ((Chest)holder).hasMetadata("isCrate") && ((Chest)holder).getMetadata("isCrate").size() == 1 && ((Chest)holder).getMetadata("isCrate").get(0).asBoolean()){
+		//InventoryHolder holder = ev.getInventory().getHolder();
+		//if(holder instanceof Chest && ((Chest)holder).hasMetadata("isCrate") && ((Chest)holder).getMetadata("isCrate").size() == 1 && ((Chest)holder).getMetadata("isCrate").get(0).asBoolean()){
+		Player player = (Player)ev.getPlayer();
+		if(openCrates.containsKey(player)){
 			refreshLE();                                                 // Closed chest is a crate
 			refreshLU();
 			refreshC();
 			
-			Chest chest = (Chest)holder;                                 // Deletes crate from Used list
-			String sLoc = serializeLoc(chest.getLocation());
-			Crate crate = new Crate(locUsed.getString(sLoc)); 
+			Crate crate = openCrates.remove(player); 
+			String sLoc = serializeLoc(crate.loc);
+			Chest chest = (Chest)crate.loc.getBlock();                   // Deletes crate from Used list
 			locUsed.set(sLoc, null);
 			
 			crate.alive = false;                                         // Sets crate to dead, assigns spawn target time in milliseconds
