@@ -59,7 +59,7 @@ public class LootCrates extends JavaPlugin implements Listener{
 	FileConfiguration locEmpty = null;
 	FileConfiguration locUsed = null;
 	public static Plugin plugin;
-	//private KingdomLifeAPI kLifeAPI;
+	private KingdomLifeAPI kLifeAPI;
 	final EnumParticle[] particles = {EnumParticle.CLOUD, EnumParticle.CRIT_MAGIC, EnumParticle.SPELL_WITCH, EnumParticle.VILLAGER_HAPPY};
 	
 	HashMap<Player,Crate> openCrates = new HashMap<Player,Crate>();
@@ -103,17 +103,13 @@ public class LootCrates extends JavaPlugin implements Listener{
 		primeRespawns();
 		startParticles();
 		
-		/*new BukkitRunnable(){
+		new BukkitRunnable(){
 			public void run(){
-				if (!setUpKingdomLifeAPI() ) {
-		            getLogger().severe(String.format("[%s] - Disabled due to no KingdomLifeAPI found!", getDescription().getName()));
-		            getServer().getPluginManager().disablePlugin(plugin);
-		            return;
-		        }
+				kLifeAPI = (KingdomLifeAPI)getServer().getPluginManager().getPlugin("KingdomLifeAPI");
 				getLogger().info("LootCrates enabled!");
 			}
 		}.runTaskLater(plugin, 1);
-		*/
+		
 	}
 	
 	/*private boolean setUpKingdomLifeAPI(){
@@ -230,8 +226,8 @@ public class LootCrates extends JavaPlugin implements Listener{
 			openCrates.put(player, crate);
 			
 			String uuid = player.getUniqueId().toString();
-			String type = KingdomLifeAPI.type(uuid);
-			int level = KingdomLifeAPI.level(uuid, type) + crate.level;
+			String type = kLifeAPI.type(uuid);
+			int level = kLifeAPI.level(uuid, type) + crate.level;
 			if(level < 0)
 				level = 0;
 			else {
@@ -243,8 +239,19 @@ public class LootCrates extends JavaPlugin implements Listener{
 			String[] rarityArr = {"Common","Uncommon","Unique","Rare"};
 			int ranRar  = (int)Math.floor(Math.random()*4);
 			
-			List<ItemStack> items = KingdomLifeAPI.getItems(type, rarityArr[ranRar], level+"");
-			ItemStack item = items.get((int)Math.floor(Math.random()*items.size()));
+			List<ItemStack> items = null;
+			ItemStack item = null;
+			
+			while(item == null){
+				items = kLifeAPI.getItems(type.split("-")[1], "any", level+"");
+				if(items.size() > 0)
+					item = items.get((int)Math.floor(Math.random()*items.size()));
+				else {
+					level--;
+					if(level == -1)
+						item = new ItemStack(Material.AIR);
+				}
+			}
 			
 			int shards = (int)Math.floor(Math.random()*5+1) + level * 4;
 			ItemStack shardStack = new ItemStack(Material.PRISMARINE_SHARD, shards);
@@ -259,9 +266,9 @@ public class LootCrates extends JavaPlugin implements Listener{
 			im.setLore(lores);
 			shardStack.setItemMeta(im);
 			
-			int tier = (int)Math.floor(((double)crate.level)/5.0);
+			int tier = (int)Math.floor(((double)crate.level+10.0)/5.0);
 			
-			Inventory spectate = Bukkit.createInventory(ev.getPlayer(), 4, "Tier "+tier+" Loot Crate");
+			Inventory spectate = Bukkit.createInventory(ev.getPlayer(), 36, "Tier "+tier+" Loot Crate");
 	        
 			spectate.setItem(0, item);
 			spectate.setItem(1, shardStack);
@@ -282,8 +289,8 @@ public class LootCrates extends JavaPlugin implements Listener{
 			refreshC();
 			
 			Crate crate = openCrates.remove(player); 
-			String sLoc = serializeLoc(crate.loc);
-			Chest chest = (Chest)crate.loc.getBlock();                   // Deletes crate from Used list
+			Block chest = crate.loc.getBlock();                          // Deletes crate from Used list
+			String sLoc = serializeLoc(chest.getLocation());
 			locUsed.set(sLoc, null);
 			
 			crate.alive = false;                                         // Sets crate to dead, assigns spawn target time in milliseconds
