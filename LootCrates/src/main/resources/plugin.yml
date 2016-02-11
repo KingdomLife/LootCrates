@@ -7,3 +7,7 @@ commands:
     description: Adds loot crate.
     usage: /<command> <here | x,y,z>
     permission: lootcrates.lcadd
+  lcdel:
+    description: Removes loot crate.
+    usage: /<command>
+    permission: lootcrates.lcdel

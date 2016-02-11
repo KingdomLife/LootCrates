@@ -5,7 +5,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -51,7 +53,7 @@ import net.minecraft.server.v1_8_R3.PacketPlayOutWorldParticles;
  *
  */
 public class LootCrates extends JavaPlugin implements Listener{
-	
+	Random rand;
 	File configFile;
 	File locEmptyFile;
 	File locUsedFile;
@@ -67,6 +69,7 @@ public class LootCrates extends JavaPlugin implements Listener{
 	private String prefix = ChatColor.DARK_GRAY + "" + ChatColor.BOLD + "[" + ChatColor.AQUA + "LootCrates" + ChatColor.DARK_GRAY + "" + ChatColor.BOLD + "] ";
 	
 	public void onEnable(){
+		rand = new Random();
 		plugin = this;
 		this.getServer().getPluginManager().registerEvents(this, this);   // Registers plugin to listen events
 		try{
@@ -82,8 +85,8 @@ public class LootCrates extends JavaPlugin implements Listener{
         		config.addDefault("ItemMaxLevelDifference", 10);          // Max level difference of an item
         		config.addDefault("AllowNewCrateLocations", true);        // Whether adding locations is allowed
         		config.addDefault("DebugLogging", false);        // Whether debug messages show
-        		config.addDefault("CrateRespawnDelay", 30);               // Delay for crate respawn (seconds)
-        		config.addDefault("CrateUpgradeDelay", 10);               // Delay for crate upgrade (seconds)
+        		config.addDefault("CrateRespawnDelay", 600);               // Delay for crate respawn (seconds)
+        		config.addDefault("CrateUpgradeDelay", 660);               // Delay for crate upgrade (seconds)
         		config.options().copyDefaults(true);                      // Implements defaults
         		saveC();
             }
@@ -156,6 +159,35 @@ public class LootCrates extends JavaPlugin implements Listener{
 			return true;
 			
 		}
+		else if(cmd.getName().equalsIgnoreCase("lcdel")){
+			Block target = player.getTargetBlock((HashSet<Byte>)null, 200);
+			Location loc = target.getLocation();
+			
+			refreshLU();
+			refreshLE();
+			
+			String sLoc = serializeLoc(target.getLocation());
+			
+			if(locUsed.contains(sLoc)){
+				locUsed.set(sLoc, null);
+				messageP(player, ChatColor.GREEN+"Successfully removed crate at "+loc.getWorld().getName()+","+loc.getBlockX()+","+loc.getBlockY()+","+loc.getBlockZ());
+				saveLU();
+				target.setType(Material.AIR);
+				target.removeMetadata("isCrate", this);
+			}
+			else if(locEmpty.contains(sLoc))
+			{
+				locEmpty.set(sLoc, null);
+				messageP(player, ChatColor.GREEN+"Successfully removed crate at "+loc.getWorld().getName()+","+loc.getBlockX()+","+loc.getBlockY()+","+loc.getBlockZ());
+				saveLE();
+				target.setType(Material.AIR);
+				target.removeMetadata("isCrate", this);
+			}
+			else
+				messageP(player, ChatColor.RED+"There is no crate at "+loc.getWorld().getName()+","+loc.getBlockX()+","+loc.getBlockY()+","+loc.getBlockZ());
+			
+			return true;
+		}
 		
 		return false;
 	}
@@ -210,6 +242,16 @@ public class LootCrates extends JavaPlugin implements Listener{
 	}
 	
 	@EventHandler
+	public void onInteract(PlayerInteractEvent ev){
+		if(ev.getAction() == Action.LEFT_CLICK_BLOCK){
+			Block holder = ev.getClickedBlock();
+			if(holder.hasMetadata("isCrate") && holder.getMetadata("isCrate").size() == 1 && holder.getMetadata("isCrate").get(0).asBoolean()){
+				ev.setCancelled(true);
+			}
+		}
+	}
+	
+	@EventHandler
 	public void onInvOpen(InventoryOpenEvent ev){
 		InventoryHolder holder = ev.getInventory().getHolder();
 		if(holder instanceof Chest && ((Chest)holder).hasMetadata("isCrate") && ((Chest)holder).getMetadata("isCrate").size() == 1 && ((Chest)holder).getMetadata("isCrate").get(0).asBoolean()){
@@ -222,6 +264,10 @@ public class LootCrates extends JavaPlugin implements Listener{
 			String sLoc = serializeLoc(chest.getLocation());
 			Crate crate = new Crate(locUsed.getString(sLoc)); 
 			Player player = (Player)ev.getPlayer();
+			
+			if(openCrates.containsValue(crate)){
+				return;
+			}
 			
 			openCrates.put(player, crate);
 			
@@ -236,8 +282,8 @@ public class LootCrates extends JavaPlugin implements Listener{
 					level = maxLevel;
 			}
 			
-			String[] rarityArr = {"Common","Uncommon","Unique","Rare"};
-			int ranRar  = (int)Math.floor(Math.random()*4);
+			//String[] rarityArr = {"Common","Uncommon","Unique","Rare"};
+			//int ranRar  = (int)Math.floor(Math.random()*4);
 			
 			List<ItemStack> items = null;
 			ItemStack item = null;
@@ -248,8 +294,10 @@ public class LootCrates extends JavaPlugin implements Listener{
 					item = items.get((int)Math.floor(Math.random()*items.size()));
 				else {
 					level--;
-					if(level == -1)
+					if(level == -1){
 						item = new ItemStack(Material.AIR);
+						level = 0;
+					}
 				}
 			}
 			
@@ -269,9 +317,34 @@ public class LootCrates extends JavaPlugin implements Listener{
 			int tier = (int)Math.floor(((double)crate.level+10.0)/5.0);
 			
 			Inventory spectate = Bukkit.createInventory(ev.getPlayer(), 36, "Tier "+tier+" Loot Crate");
-	        
-			spectate.setItem(0, item);
-			spectate.setItem(1, shardStack);
+	        double fourth = shards/4.0;
+			int r1 = (int)Math.floor(rand.nextDouble()*fourth);
+			int r2 = (int)Math.floor(rand.nextDouble()*fourth);
+			int r3 = (int)Math.floor(rand.nextDouble()*fourth);
+			int r4 = shards - r1 - r2 - r3;
+			int[] sms = {r1, r2, r3, r4};
+			
+			for(int i = 0; i < 4; i++){
+				outerloop:
+				while(true){
+					int spot = (int)Math.floor(rand.nextDouble()*36);
+					if(spectate.getItem(spot) == null){
+						if(sms[i] > 0){
+							shardStack.setAmount(sms[i]);
+							spectate.setItem(spot, shardStack);
+						}
+						break outerloop;
+					}
+				}
+			}
+			outerouterloop:
+			while(true){
+				int spot = (int)Math.floor(rand.nextDouble()*36);
+				if(spectate.getItem(spot) == null){
+					spectate.setItem(spot, item);
+					break outerouterloop;
+				}
+			}
 
 			player.openInventory(spectate);
 		}
@@ -430,7 +503,7 @@ public class LootCrates extends JavaPlugin implements Listener{
 								float newZ = (float)(zLoc(i, radius) + z);
 								
 								PacketPlayOutWorldParticles packet= new PacketPlayOutWorldParticles(EnumParticle.VILLAGER_HAPPY, true, newX, newY, newZ, 0f, 0f, 0f, 0f, 1);
-								for(Player player : Bukkit.getServer().getOnlinePlayers()){
+								for(Player player : loc.getWorld().getPlayers()){
 									((CraftPlayer)player).getHandle().playerConnection.sendPacket(packet);
 								}
 							}
